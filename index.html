@@ -76,41 +76,97 @@
             }
         });
 
-        // 3. Captura Sincronizada (Versión iOS/Bluefy)
+        // 3. Captura Sincronizada con Visualización de Profundidad
         btnCapture.addEventListener('click', () => {
             if(!lastDepthMatrix) {
                 alert("Aún no hay datos del sensor. Asegúrate de conectar el Bluetooth primero.");
                 return;
             }
 
-            // 3.1 Capturar la foto del video a un Canvas
+            // 3.1 Preparar el Canvas con las dimensiones del video
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
+            const ctx = canvas.getContext('2d');
 
-            // 3.2 Mostrar la imagen en pantalla en formato base64
+            // 3.2 Dibujar la foto original como fondo
+            ctx.drawImage(video, 0, 0);
+
+            // 3.3 Encontrar la distancia mínima y máxima para escalar el tamaño de los puntos
+            let minDist = Infinity;
+            let maxDist = -Infinity;
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const dist = lastDepthMatrix[r][c];
+                    if (dist > 0 && dist < 4000) { // Ignorar 0s o valores de error gigante
+                        if (dist < minDist) minDist = dist;
+                        if (dist > maxDist) maxDist = dist;
+                    }
+                }
+            }
+            // Fallback por si la matriz está vacía o defectuosa
+            if (minDist === Infinity) { minDist = 1; maxDist = 2; } 
+
+            // 3.4 Calcular dimensiones de la grilla para superponerla en toda la imagen
+            const cellW = canvas.width / 8;
+            const cellH = canvas.height / 8;
+            // El radio máximo será un poco menos que la mitad de la celda para que no choquen
+            const maxRadius = Math.min(cellW, cellH) / 2.2; 
+            const minRadius = maxRadius * 0.15; // Radio mínimo para puntos lejanos
+
+            // 3.5 Dibujar los 64 puntos
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const dist = lastDepthMatrix[r][c];
+                    
+                    if (dist > 0 && dist < 4000) {
+                        // Normalizar (0.0 = más lejos, 1.0 = más cerca)
+                        const normalized = 1.0 - ((dist - minDist) / (maxDist - minDist));
+                        // Calcular radio proporcional
+                        const radius = minRadius + (normalized * (maxRadius - minRadius));
+                        
+                        // Coordenadas centrales de esta celda
+                        const x = c * cellW + cellW / 2;
+                        const y = r * cellH + cellH / 2;
+                        
+                        // Dibujar el círculo (verde semi-transparente)
+                        ctx.beginPath();
+                        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+                        ctx.fillStyle = 'rgba(0, 255, 100, 0.5)';
+                        ctx.fill();
+                        ctx.lineWidth = 2;
+                        ctx.strokeStyle = 'rgba(0, 200, 50, 0.8)';
+                        ctx.stroke();
+                        
+                        // Escribir la distancia en mm sobre el círculo
+                        ctx.fillStyle = 'white';
+                        ctx.font = 'bold 16px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        
+                        // Borde negro para que el texto sea legible siempre
+                        ctx.strokeStyle = 'black'; 
+                        ctx.lineWidth = 3;
+                        ctx.strokeText(dist, x, y);
+                        ctx.fillText(dist, x, y);
+                    }
+                }
+            }
+
+            // 3.6 Mostrar la imagen final (Foto + Grilla) en la pantalla
             document.getElementById('resultImage').src = canvas.toDataURL('image/jpeg', 0.9);
 
-            // 3.3 Formatear los datos sincronizados
+            // 3.7 Formatear y mostrar el JSON
             const syncedData = JSON.stringify({
                 timestamp: Date.now(),
                 sensor: "VL53L5CX",
                 resolution: [8, 8],
                 depth_mm: lastDepthMatrix
             }, null, 2);
-
-            // 3.4 Mostrar el JSON en el cuadro de texto
             document.getElementById('resultJSON').value = syncedData;
-
-            // 3.5 Hacer visible el contenedor de resultados
             document.getElementById('outputContainer').style.display = 'block';
-            
-            // Opcional: Pausar el video para dar feedback visual de que se tomó la foto
-            video.pause();
-            setTimeout(() => video.play(), 500); 
         });
-
+        
         // 4. Lógica del botón compartir nativo de iOS
         document.getElementById('btnShare').addEventListener('click', async () => {
             const jsonData = document.getElementById('resultJSON').value;
