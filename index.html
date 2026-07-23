@@ -4,7 +4,7 @@
     <title>Calibración ToF Sincronizada</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
-<body style="font-family: sans-serif; padding: 10px;">
+<body style="font-family: sans-serif; padding: 10px; padding-bottom: 50px;">
     <h2>Herramienta de Calibración ToF</h2>
     
     <!-- Video de la cámara en vivo -->
@@ -15,20 +15,17 @@
         <button id="btnCapture" disabled style="padding: 10px; background-color: #666; color: white; border: none; border-radius: 5px; width: 48%; float: right;">2. Capturar Foto</button>
     </div>
 
-    <!-- Contenedor Principal de la Imagen (Oculto al inicio) -->
+    <!-- Contenedor de la Imagen de Calibración (Con Puntos) -->
     <div id="canvasContainer" style="display: none; margin-top: 20px; position: relative;">
-        <!-- El canvas procesa los gráficos en segundo plano -->
         <canvas id="mainCanvas" style="display: none;"></canvas>
-        
-        <p style="font-size: 14px; color: #d9534f; font-weight: bold; margin-bottom: 5px;">Mantén presionada la imagen abajo para guardarla</p>
-        <!-- Esta es la imagen interactiva que sí permite ser guardada en iOS -->
+        <p style="font-size: 14px; color: #555; font-weight: bold; margin-bottom: 5px;">Vista de calibración (No guardar esta):</p>
         <img id="resultImage" style="width: 100%; max-width: 400px; border: 2px solid #333; border-radius: 8px;" />
     </div>
 
-    <!-- Controles de Calibración Post Captura (Ocultos al inicio) -->
+    <!-- Controles de Calibración Post Captura -->
     <div id="calibrationControls" style="display: none; margin-top: 20px; max-width: 400px;">
         <h3 style="color: #007aff;">Modo Calibración</h3>
-        <p style="font-size: 14px; color: #555;">Ajusta los controles hasta que el punto con el menor número (en mm) coincida con la punta del objeto fotografiado.</p>
+        <p style="font-size: 14px; color: #555;">Ajusta los controles hasta que el punto con el menor número coincida con la punta del objeto.</p>
         
         <label>Escala (Zoom): <span id="valScale" style="font-weight: bold;">1.00</span></label><br>
         <input type="range" id="sliderScale" min="0.1" max="3.0" step="0.01" value="1.0" style="width: 100%; margin-bottom: 15px;">
@@ -39,7 +36,14 @@
         <label>Desplazamiento Y: <span id="valY" style="font-weight: bold;">0.000</span></label><br>
         <input type="range" id="sliderY" min="-1" max="1" step="0.005" value="0" style="width: 100%; margin-bottom: 20px;">
 
-        <button id="btnExport" style="padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 5px; width: 100%; font-size: 16px; font-weight: bold;">Exportar Calibración</button>
+        <button id="btnExport" style="padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 5px; width: 100%; font-size: 16px; font-weight: bold; margin-bottom: 20px;">Exportar Calibración (JSON)</button>
+    </div>
+
+    <!-- Contenedor de la Foto Limpia (Sin Puntos) -->
+    <div id="cleanImageContainer" style="display: none; margin-top: 10px; max-width: 400px; border-top: 2px dashed #ccc; padding-top: 20px;">
+        <h3 style="color: #007aff; margin-top: 0;">Foto Limpia (Para enviar)</h3>
+        <p style="font-size: 14px; color: #d9534f; font-weight: bold; margin-bottom: 5px;">Mantén presionada esta imagen para guardarla limpia.</p>
+        <img id="cleanImage" style="width: 100%; max-width: 400px; border: 2px solid #333; border-radius: 8px;" />
     </div>
 
     <script>
@@ -50,10 +54,9 @@
         const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
         
         let lastDepthMatrix = null;
-        let frozenImageCanvas = null; // Guardará la foto sin los puntos
-        let frozenDepthMatrix = null; // Guardará la matriz congelada en el momento exacto
+        let frozenImageCanvas = null; 
+        let frozenDepthMatrix = null; 
         
-        // Elementos del DOM
         const video = document.getElementById('cameraStream');
         const btnConnect = document.getElementById('btnConnect');
         const btnCapture = document.getElementById('btnCapture');
@@ -97,21 +100,16 @@
                             row.push(view.getUint16(offset, true)); 
                             offset += 2;
                         }
-                        
-                        // ROTACIÓN 180° - Paso 1: Invertir el orden de las columnas (espejo horizontal)
                         row.reverse(); 
-                        
                         matrix.push(row);
                     }
-                    
-                    // ROTACIÓN 180° - Paso 2: Invertir el orden de las filas (espejo vertical)
                     matrix.reverse();
                     
                     lastDepthMatrix = matrix; 
                 });
 
                 btnCapture.disabled = false;
-                btnCapture.style.backgroundColor = "#ff3b30"; // Botón se pone rojo al estar listo
+                btnCapture.style.backgroundColor = "#ff3b30";
                 btnConnect.innerText = "BLE Conectado ✓";
                 btnConnect.style.backgroundColor = "#28a745";
             } catch (error) {
@@ -121,7 +119,7 @@
         });
 
         // ----------------------------------------------------
-        // 3. INICIAR EL MODO CALIBRACIÓN (AL CAPTURAR)
+        // 3. INICIAR EL MODO CALIBRACIÓN
         // ----------------------------------------------------
         btnCapture.addEventListener('click', () => {
             if(!lastDepthMatrix) {
@@ -129,29 +127,27 @@
                 return;
             }
 
-            // Hacer una copia independiente (congelar) de la matriz en este milisegundo
             frozenDepthMatrix = JSON.parse(JSON.stringify(lastDepthMatrix));
 
-            // Congelar la cámara en un canvas de respaldo
             frozenImageCanvas = document.createElement('canvas');
             frozenImageCanvas.width = video.videoWidth;
             frozenImageCanvas.height = video.videoHeight;
             frozenImageCanvas.getContext('2d').drawImage(video, 0, 0);
 
-            // Ajustar el canvas principal a la resolución de la foto
             mainCanvas.width = video.videoWidth;
             mainCanvas.height = video.videoHeight;
 
-            // Ocultar video en vivo y botones iniciales
             video.style.display = 'none';
             btnConnect.style.display = 'none';
             btnCapture.style.display = 'none';
             
-            // Mostrar los controles de calibración
             document.getElementById('canvasContainer').style.display = 'block';
             document.getElementById('calibrationControls').style.display = 'block';
+            document.getElementById('cleanImageContainer').style.display = 'block';
 
-            // Dibujar el primer frame con la grilla
+            // Insertar la foto virgen en el contenedor inferior
+            document.getElementById('cleanImage').src = frozenImageCanvas.toDataURL('image/jpeg', 1.0);
+
             drawCalibration();
         });
 
@@ -161,21 +157,17 @@
         function drawCalibration() {
             if (!frozenImageCanvas || !frozenDepthMatrix) return; 
 
-            // Leer valores de los sliders
             const scale = parseFloat(sliderScale.value);
             const normX = parseFloat(sliderX.value); 
             const normY = parseFloat(sliderY.value);
 
-            // Actualizar los números en la pantalla
             document.getElementById('valScale').innerText = scale.toFixed(2);
             document.getElementById('valX').innerText = normX.toFixed(3);
             document.getElementById('valY').innerText = normY.toFixed(3);
 
-            // Limpiar canvas y poner la foto de fondo intacta
             ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
             ctx.drawImage(frozenImageCanvas, 0, 0);
 
-            // Calcular transformación geométrica
             const offsetX = normX * mainCanvas.width;
             const offsetY = normY * mainCanvas.height;
             const gridW = mainCanvas.width * scale;
@@ -185,7 +177,6 @@
             const cellW = gridW / 8;
             const cellH = gridH / 8;
 
-            // Encontrar distancias min/max para colorear y escalar los círculos
             let minDist = Infinity;
             let maxDist = -Infinity;
             for (let r = 0; r < 8; r++) {
@@ -201,7 +192,6 @@
             const maxRadius = Math.min(cellW, cellH) / 2.2;
             const minRadius = maxRadius * 0.15;
 
-            // Dibujar la malla de puntos
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     const dist = frozenDepthMatrix[r][c];
@@ -231,7 +221,7 @@
                     }
                 }
             }
-            // Pasar el gráfico del canvas oculto a la etiqueta <img> visible
+            
             document.getElementById('resultImage').src = mainCanvas.toDataURL('image/jpeg', 0.9);
         }
 
