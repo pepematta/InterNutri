@@ -199,7 +199,7 @@
             // Dibujar la malla de puntos
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
-                    const dist = lastDepthMatrix[r][c];
+                    const dist = frozenDepthMatrix[r][c];
                     if (dist > 0 && dist < 4000) {
                         const normalized = 1.0 - ((dist - minDist) / (maxDist - minDist));
                         const radius = minRadius + (normalized * (maxRadius - minRadius));
