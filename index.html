@@ -84,14 +84,23 @@
                     const view = event.target.value;
                     let matrix = [];
                     let offset = 0;
+                    
                     for(let r = 0; r < 8; r++){
                         let row = [];
                         for(let c = 0; c < 8; c++){
                             row.push(view.getUint16(offset, true)); 
                             offset += 2;
                         }
+                        
+                        // ROTACIÓN 180° - Paso 1: Invertir el orden de las columnas (espejo horizontal)
+                        row.reverse(); 
+                        
                         matrix.push(row);
                     }
+                    
+                    // ROTACIÓN 180° - Paso 2: Invertir el orden de las filas (espejo vertical)
+                    matrix.reverse();
+                    
                     lastDepthMatrix = matrix; 
                 });
 
