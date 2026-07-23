@@ -1,46 +1,72 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Captura ToF Sincronizada</title>
+    <title>Calibración ToF Sincronizada</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
-<body>
-    <h2>Herramienta de Captura ToF</h2>
+<body style="font-family: sans-serif; padding: 10px;">
+    <h2>Herramienta de Calibración ToF</h2>
     
     <!-- Video de la cámara en vivo -->
-    <video id="cameraStream" autoplay playsinline style="width: 100%; max-width: 400px;"></video>
-    <br>
+    <video id="cameraStream" autoplay playsinline style="width: 100%; max-width: 400px; border-radius: 8px;"></video>
     
-    <button id="btnConnect">1. Conectar BLE</button>
-    <button id="btnCapture" disabled>2. Capturar Foto y Datos</button>
+    <div style="margin-top: 10px; max-width: 400px;">
+        <button id="btnConnect" style="padding: 10px; background-color: #007aff; color: white; border: none; border-radius: 5px; width: 48%;">1. Conectar BLE</button>
+        <button id="btnCapture" disabled style="padding: 10px; background-color: #666; color: white; border: none; border-radius: 5px; width: 48%; float: right;">2. Capturar Foto</button>
+    </div>
 
-    <div id="outputContainer" style="display: none; margin-top: 20px; font-family: sans-serif;">
-        <h3 style="color: green;">¡Captura Exitosa!</h3>
+    <!-- Contenedor Principal de la Imagen (Oculto al inicio) -->
+    <div id="canvasContainer" style="display: none; margin-top: 20px; position: relative;">
+        <canvas id="mainCanvas" style="width: 100%; max-width: 400px; border: 2px solid #333; border-radius: 8px;"></canvas>
+    </div>
+
+    <!-- Controles de Calibración Post Captura (Ocultos al inicio) -->
+    <div id="calibrationControls" style="display: none; margin-top: 20px; max-width: 400px;">
+        <h3 style="color: #007aff;">Modo Calibración</h3>
+        <p style="font-size: 14px; color: #555;">Ajusta los controles hasta que el punto con el menor número (en mm) coincida con la punta del objeto fotografiado.</p>
         
-        <p><b>1. Foto:</b> Mantén presionada la imagen para "Guardar en Fotos"</p>
-        <img id="resultImage" style="width: 100%; max-width: 400px; border: 2px solid #333; border-radius: 8px;" />
+        <label>Escala (Zoom): <span id="valScale" style="font-weight: bold;">1.00</span></label><br>
+        <input type="range" id="sliderScale" min="0.1" max="3.0" step="0.01" value="1.0" style="width: 100%; margin-bottom: 15px;">
         
-        <p><b>2. Datos ToF:</b> Copia este texto o presiona compartir</p>
-        <textarea id="resultJSON" rows="12" style="width: 100%; max-width: 400px; font-family: monospace;"></textarea>
-        <br>
-        <button id="btnShare" style="margin-top: 10px; padding: 10px; background-color: #007aff; color: white; border: none; border-radius: 5px;">Compartir Datos (WhatsApp/Mail)</button>
+        <label>Desplazamiento X: <span id="valX" style="font-weight: bold;">0.000</span></label><br>
+        <input type="range" id="sliderX" min="-1" max="1" step="0.005" value="0" style="width: 100%; margin-bottom: 15px;">
+        
+        <label>Desplazamiento Y: <span id="valY" style="font-weight: bold;">0.000</span></label><br>
+        <input type="range" id="sliderY" min="-1" max="1" step="0.005" value="0" style="width: 100%; margin-bottom: 20px;">
+
+        <button id="btnExport" style="padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 5px; width: 100%; font-size: 16px; font-weight: bold;">Exportar Calibración</button>
     </div>
 
     <script>
+        // ----------------------------------------------------
+        // VARIABLES GLOBALES Y CONFIGURACIÓN
+        // ----------------------------------------------------
         const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
         
         let lastDepthMatrix = null;
+        let frozenImageCanvas = null; // Guardará la foto sin los puntos
+        
+        // Elementos del DOM
         const video = document.getElementById('cameraStream');
         const btnConnect = document.getElementById('btnConnect');
         const btnCapture = document.getElementById('btnCapture');
+        const mainCanvas = document.getElementById('mainCanvas');
+        const ctx = mainCanvas.getContext('2d');
+        const sliderScale = document.getElementById('sliderScale');
+        const sliderX = document.getElementById('sliderX');
+        const sliderY = document.getElementById('sliderY');
 
-        // 1. Iniciar la cámara trasera
+        // ----------------------------------------------------
+        // 1. INICIAR CÁMARA
+        // ----------------------------------------------------
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
             .then(stream => { video.srcObject = stream; })
             .catch(err => console.error("Error accediendo a la cámara", err));
 
-        // 2. Conexión Bluetooth
+        // ----------------------------------------------------
+        // 2. CONEXIÓN BLUETOOTH
+        // ----------------------------------------------------
         btnConnect.addEventListener('click', async () => {
             try {
                 const device = await navigator.bluetooth.requestDevice({
@@ -55,81 +81,119 @@
                 await characteristic.startNotifications();
                 
                 characteristic.addEventListener('characteristicvaluechanged', (event) => {
-                    const view = event.target.value; // DataView con los 128 bytes
+                    const view = event.target.value;
                     let matrix = [];
                     let offset = 0;
                     for(let r = 0; r < 8; r++){
                         let row = [];
                         for(let c = 0; c < 8; c++){
-                            row.push(view.getUint16(offset, true)); // true = Little Endian
+                            row.push(view.getUint16(offset, true)); 
                             offset += 2;
                         }
                         matrix.push(row);
                     }
-                    lastDepthMatrix = matrix; // Mantiene el último frame en caché
+                    lastDepthMatrix = matrix; 
                 });
 
                 btnCapture.disabled = false;
-                alert("Sensor ToF Conectado y recibiendo datos!");
+                btnCapture.style.backgroundColor = "#ff3b30"; // Botón se pone rojo al estar listo
+                btnConnect.innerText = "BLE Conectado ✓";
+                btnConnect.style.backgroundColor = "#28a745";
             } catch (error) {
                 console.error("Error BLE:", error);
+                alert("Error conectando al Bluetooth. Revisa los permisos.");
             }
         });
 
-        // 3. Captura Sincronizada con Visualización de Profundidad
+        // ----------------------------------------------------
+        // 3. INICIAR EL MODO CALIBRACIÓN (AL CAPTURAR)
+        // ----------------------------------------------------
         btnCapture.addEventListener('click', () => {
             if(!lastDepthMatrix) {
-                alert("Aún no hay datos del sensor. Asegúrate de conectar el Bluetooth primero.");
+                alert("Aún no hay datos del sensor. Asegúrate de encender el ToF.");
                 return;
             }
 
-            // 3.1 Preparar el Canvas con las dimensiones del video
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
+            // Congelar la cámara en un canvas de respaldo
+            frozenImageCanvas = document.createElement('canvas');
+            frozenImageCanvas.width = video.videoWidth;
+            frozenImageCanvas.height = video.videoHeight;
+            frozenImageCanvas.getContext('2d').drawImage(video, 0, 0);
 
-            // 3.2 Dibujar la foto original como fondo
-            ctx.drawImage(video, 0, 0);
+            // Ajustar el canvas principal a la resolución de la foto
+            mainCanvas.width = video.videoWidth;
+            mainCanvas.height = video.videoHeight;
 
-            // 3.3 Encontrar la distancia mínima y máxima para escalar el tamaño de los puntos
+            // Ocultar video en vivo y botones iniciales
+            video.style.display = 'none';
+            btnConnect.style.display = 'none';
+            btnCapture.style.display = 'none';
+            
+            // Mostrar los controles de calibración
+            document.getElementById('canvasContainer').style.display = 'block';
+            document.getElementById('calibrationControls').style.display = 'block';
+
+            // Dibujar el primer frame con la grilla
+            drawCalibration();
+        });
+
+        // ----------------------------------------------------
+        // 4. MOTOR DE RENDERIZADO INTERACTIVO
+        // ----------------------------------------------------
+        function drawCalibration() {
+            if (!frozenImageCanvas || !lastDepthMatrix) return;
+
+            // Leer valores de los sliders
+            const scale = parseFloat(sliderScale.value);
+            const normX = parseFloat(sliderX.value); 
+            const normY = parseFloat(sliderY.value);
+
+            // Actualizar los números en la pantalla
+            document.getElementById('valScale').innerText = scale.toFixed(2);
+            document.getElementById('valX').innerText = normX.toFixed(3);
+            document.getElementById('valY').innerText = normY.toFixed(3);
+
+            // Limpiar canvas y poner la foto de fondo intacta
+            ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+            ctx.drawImage(frozenImageCanvas, 0, 0);
+
+            // Calcular transformación geométrica
+            const offsetX = normX * mainCanvas.width;
+            const offsetY = normY * mainCanvas.height;
+            const gridW = mainCanvas.width * scale;
+            const gridH = mainCanvas.height * scale;
+            const startX = (mainCanvas.width / 2) - (gridW / 2) + offsetX;
+            const startY = (mainCanvas.height / 2) - (gridH / 2) + offsetY;
+            const cellW = gridW / 8;
+            const cellH = gridH / 8;
+
+            // Encontrar distancias min/max para colorear y escalar los círculos
             let minDist = Infinity;
             let maxDist = -Infinity;
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     const dist = lastDepthMatrix[r][c];
-                    if (dist > 0 && dist < 4000) { // Ignorar 0s o valores de error gigante
+                    if (dist > 0 && dist < 4000) {
                         if (dist < minDist) minDist = dist;
                         if (dist > maxDist) maxDist = dist;
                     }
                 }
             }
-            // Fallback por si la matriz está vacía o defectuosa
-            if (minDist === Infinity) { minDist = 1; maxDist = 2; } 
+            if (minDist === Infinity) { minDist = 1; maxDist = 2; }
+            const maxRadius = Math.min(cellW, cellH) / 2.2;
+            const minRadius = maxRadius * 0.15;
 
-            // 3.4 Calcular dimensiones de la grilla para superponerla en toda la imagen
-            const cellW = canvas.width / 8;
-            const cellH = canvas.height / 8;
-            // El radio máximo será un poco menos que la mitad de la celda para que no choquen
-            const maxRadius = Math.min(cellW, cellH) / 2.2; 
-            const minRadius = maxRadius * 0.15; // Radio mínimo para puntos lejanos
-
-            // 3.5 Dibujar los 64 puntos
+            // Dibujar la malla de puntos
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     const dist = lastDepthMatrix[r][c];
-                    
                     if (dist > 0 && dist < 4000) {
-                        // Normalizar (0.0 = más lejos, 1.0 = más cerca)
                         const normalized = 1.0 - ((dist - minDist) / (maxDist - minDist));
-                        // Calcular radio proporcional
                         const radius = minRadius + (normalized * (maxRadius - minRadius));
                         
-                        // Coordenadas centrales de esta celda
-                        const x = c * cellW + cellW / 2;
-                        const y = r * cellH + cellH / 2;
+                        const x = startX + c * cellW + cellW / 2;
+                        const y = startY + r * cellH + cellH / 2;
                         
-                        // Dibujar el círculo (verde semi-transparente)
                         ctx.beginPath();
                         ctx.arc(x, y, radius, 0, 2 * Math.PI);
                         ctx.fillStyle = 'rgba(0, 255, 100, 0.5)';
@@ -138,13 +202,10 @@
                         ctx.strokeStyle = 'rgba(0, 200, 50, 0.8)';
                         ctx.stroke();
                         
-                        // Escribir la distancia en mm sobre el círculo
                         ctx.fillStyle = 'white';
                         ctx.font = 'bold 16px Arial';
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
-                        
-                        // Borde negro para que el texto sea legible siempre
                         ctx.strokeStyle = 'black'; 
                         ctx.lineWidth = 3;
                         ctx.strokeText(dist, x, y);
@@ -152,35 +213,42 @@
                     }
                 }
             }
+        }
 
-            // 3.6 Mostrar la imagen final (Foto + Grilla) en la pantalla
-            document.getElementById('resultImage').src = canvas.toDataURL('image/jpeg', 0.9);
+        // ----------------------------------------------------
+        // 5. ESCUCHAR CAMBIOS EN LOS SLIDERS
+        // ----------------------------------------------------
+        sliderScale.addEventListener('input', drawCalibration);
+        sliderX.addEventListener('input', drawCalibration);
+        sliderY.addEventListener('input', drawCalibration);
 
-            // 3.7 Formatear y mostrar el JSON
-            const syncedData = JSON.stringify({
+        // ----------------------------------------------------
+        // 6. EXPORTAR LOS PARÁMETROS 
+        // ----------------------------------------------------
+        document.getElementById('btnExport').addEventListener('click', async () => {
+            const calibrationData = {
                 timestamp: Date.now(),
-                sensor: "VL53L5CX",
-                resolution: [8, 8],
+                calibration_parameters: {
+                    scale: parseFloat(sliderScale.value),
+                    offset_x_normalized: parseFloat(sliderX.value),
+                    offset_y_normalized: parseFloat(sliderY.value)
+                },
                 depth_mm: lastDepthMatrix
-            }, null, 2);
-            document.getElementById('resultJSON').value = syncedData;
-            document.getElementById('outputContainer').style.display = 'block';
-        });
-        
-        // 4. Lógica del botón compartir nativo de iOS
-        document.getElementById('btnShare').addEventListener('click', async () => {
-            const jsonData = document.getElementById('resultJSON').value;
+            };
+
+            const jsonString = JSON.stringify(calibrationData, null, 2);
+
             if (navigator.share) {
                 try {
                     await navigator.share({
-                        title: 'Datos ToF Sincronizados',
-                        text: jsonData
+                        title: 'Calibración ToF',
+                        text: jsonString
                     });
                 } catch (err) {
-                    console.log('Error al compartir o usuario canceló', err);
+                    console.log('Usuario canceló o hubo un error al compartir', err);
                 }
             } else {
-                alert("La función de compartir no está soportada. Por favor, selecciona el texto y cópialo manualmente.");
+                alert("Copia estos datos:\n\n" + jsonString);
             }
         });
     </script>
