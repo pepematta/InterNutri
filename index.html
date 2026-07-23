@@ -14,6 +14,18 @@
     <button id="btnConnect">1. Conectar BLE</button>
     <button id="btnCapture" disabled>2. Capturar Foto y Datos</button>
 
+    <div id="outputContainer" style="display: none; margin-top: 20px; font-family: sans-serif;">
+        <h3 style="color: green;">¡Captura Exitosa!</h3>
+        
+        <p><b>1. Foto:</b> Mantén presionada la imagen para "Guardar en Fotos"</p>
+        <img id="resultImage" style="width: 100%; max-width: 400px; border: 2px solid #333; border-radius: 8px;" />
+        
+        <p><b>2. Datos ToF:</b> Copia este texto o presiona compartir</p>
+        <textarea id="resultJSON" rows="12" style="width: 100%; max-width: 400px; font-family: monospace;"></textarea>
+        <br>
+        <button id="btnShare" style="margin-top: 10px; padding: 10px; background-color: #007aff; color: white; border: none; border-radius: 5px;">Compartir Datos (WhatsApp/Mail)</button>
+    </div>
+
     <script>
         const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
@@ -64,14 +76,23 @@
             }
         });
 
-        // 3. Captura Sincronizada
+        // 3. Captura Sincronizada (Versión iOS/Bluefy)
         btnCapture.addEventListener('click', () => {
             if(!lastDepthMatrix) {
-                alert("Aún no hay datos del sensor");
+                alert("Aún no hay datos del sensor. Asegúrate de conectar el Bluetooth primero.");
                 return;
             }
 
-            // Congelar datos del sensor
+            // 3.1 Capturar la foto del video a un Canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+
+            // 3.2 Mostrar la imagen en pantalla en formato base64
+            document.getElementById('resultImage').src = canvas.toDataURL('image/jpeg', 0.9);
+
+            // 3.3 Formatear los datos sincronizados
             const syncedData = JSON.stringify({
                 timestamp: Date.now(),
                 sensor: "VL53L5CX",
@@ -79,26 +100,32 @@
                 depth_mm: lastDepthMatrix
             }, null, 2);
 
-            // Capturar foto del video a un Canvas
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
+            // 3.4 Mostrar el JSON en el cuadro de texto
+            document.getElementById('resultJSON').value = syncedData;
 
-            // Descargar JSON
-            const blobJSON = new Blob([syncedData], { type: 'application/json' });
-            const linkJSON = document.createElement('a');
-            linkJSON.href = URL.createObjectURL(blobJSON);
-            linkJSON.download = `tof_data_${Date.now()}.json`;
-            linkJSON.click();
+            // 3.5 Hacer visible el contenedor de resultados
+            document.getElementById('outputContainer').style.display = 'block';
+            
+            // Opcional: Pausar el video para dar feedback visual de que se tomó la foto
+            video.pause();
+            setTimeout(() => video.play(), 500); 
+        });
 
-            // Descargar Foto
-            canvas.toBlob((blobImg) => {
-                const linkImg = document.createElement('a');
-                linkImg.href = URL.createObjectURL(blobImg);
-                linkImg.download = `foto_rgb_${Date.now()}.jpg`;
-                linkImg.click();
-            }, 'image/jpeg');
+        // 4. Lógica del botón compartir nativo de iOS
+        document.getElementById('btnShare').addEventListener('click', async () => {
+            const jsonData = document.getElementById('resultJSON').value;
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: 'Datos ToF Sincronizados',
+                        text: jsonData
+                    });
+                } catch (err) {
+                    console.log('Error al compartir o usuario canceló', err);
+                }
+            } else {
+                alert("La función de compartir no está soportada. Por favor, selecciona el texto y cópialo manualmente.");
+            }
         });
     </script>
 </body>
